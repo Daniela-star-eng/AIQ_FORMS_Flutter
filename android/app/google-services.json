@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "411394758989",
+    "project_id": "aiq-forms",
+    "storage_bucket": "aiq-forms.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:411394758989:android:4b699f74f5a282371a7f04",
+        "android_client_info": {
+          "package_name": "com.example.aiq_forms"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD1uXI5hypVKVv-mtgEM8bCYuGewR0TzPQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
