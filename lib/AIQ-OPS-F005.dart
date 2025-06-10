@@ -13,7 +13,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'google_drive_upload.dart';
 
 class AIQOPSF005Screen extends StatefulWidget {
   const AIQOPSF005Screen({super.key});
@@ -630,7 +629,7 @@ class _AIQOPSF005ScreenState extends State<AIQOPSF005Screen> {
       floatingActionButton: Align(
         alignment: Alignment.bottomLeft,
         child: Padding(
-          padding: const EdgeInsets.only(left: 24.0, bottom: 2.0), // Ajusta aquí el espacio al borde
+          padding: const EdgeInsets.only(left: 24.0, bottom: 2.0),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1027,8 +1026,8 @@ Future<void> compartirPDF() async {
   final file = File('${dir.path}/AIQ-OPS-F005.pdf');
   await file.writeAsBytes(bytes);
 
-  // Sube a Drive
-  await uploadPDFToDrive(file, 'AIQ-OPS-F005-${folio}.pdf');
+  // Comparte el archivo
+  await Share.shareXFiles([XFile(file.path)], text: 'Formulario AIQ-OPS-F005');
 }
 
 Future<void> cargarFolio() async {

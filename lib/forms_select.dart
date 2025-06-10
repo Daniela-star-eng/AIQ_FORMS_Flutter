@@ -4,6 +4,12 @@ import 'package:interfaz_uno_aiq/AIQ-OPS-F008.dart';
 import 'package:interfaz_uno_aiq/AIQ-OPS-F007.dart';
 import 'package:interfaz_uno_aiq/AIQ-OPS-F005.dart';
 import 'derrames.dart'; // Asegúrate de tener este archivo creado con el widget DerramesScreen
+import 'package:interfaz_uno_aiq/AIQ_AMB_F-003.DART';
+import 'package:interfaz_uno_aiq/derrames.dart' as derrames_lib; // Asegúrate de tener este archivo creado con el widget DerramesScreen
+import 'package:interfaz_uno_aiq/AIQ-AMB-F-004.dart';
+import 'package:interfaz_uno_aiq/AIQ-AMB-F-004.dart'; // Asegúrate de importar el nuevo formulario
+import 'package:interfaz_uno_aiq/AIQ-AMB-F-001.dart';
+import 'package:interfaz_uno_aiq/AIQ-AMB-F-002.dart';
 
 class FormularioScreen extends StatefulWidget {
   const FormularioScreen({super.key});
@@ -34,6 +40,26 @@ class _FormularioScreenState extends State<FormularioScreen> {
       "codigo": "AIQ-OPS-F005",
       "imagen": "assets/AIQ-OPS-F005-FORM-PREVIEW.jpg",
     },
+    {
+      "titulo": "MONITOREO DE RESTOS DE FAUNA EN AREAS OPERATIVAS",
+      "codigo": "AIQ-AMB-F-003",
+      "imagen": "assets/generica.jpg",
+    },
+    {
+      "titulo": "NUEVO FORMULARIO",
+      "codigo": "AIQ-NF-001",
+      "imagen": "assets/avionG.jpg",
+    },
+    {
+      "titulo": "Formulario Fauna",
+      "codigo": "AIQ-AMB-F-001",
+      "imagen": "assets/foto_random.jpg",
+    },
+    {
+      "titulo": "FORMULARIO DE FAUNA Y HABITAD",
+      "codigo": "AIQ-AMB-F-002",
+      "imagen": "assets/airbus.png",
+    }
      
   ];
 
@@ -149,25 +175,44 @@ class _FormularioScreenState extends State<FormularioScreen> {
                         if (index == 0) {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (context) => const DerramesScreen()),
+                            MaterialPageRoute(builder: (context) => const derrames_lib.DerramesScreen()),
                           );
                         } else if (index == 1) {
                           Navigator.push(
                             context,
                             MaterialPageRoute(builder: (context) => const AIQOPSF008Screen()),
                           );
-                        }else if (index == 2) {
+                        } else if (index == 2) {
                           Navigator.push(
                             context,
                             MaterialPageRoute(builder: (context) => const AIQOPSF007Screen()),
                           );
-                        }else if (index == 3) {
+                        } else if (index == 3) {
                           Navigator.push(
                             context,
                             MaterialPageRoute(builder: (context) => const AIQOPSF005Screen()),
                           );
+                        } else if (index == 4) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const AIQ_AMB_F_003class()),
+                          );
+                        } else if (index == 5) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const AIQ_AMB_F_004()),
+                          );
+                        } else if (index == 6) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const AIQAMBF001Screen()),
+                          );
+                        } else if (index == 7) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const AIQAMBF002Screen()),
+                          );
                         }
-                        // Puedes agregar más condiciones para otros formularios aquí.
                       },
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(16),

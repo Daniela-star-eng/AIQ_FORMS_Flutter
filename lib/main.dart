@@ -3,6 +3,7 @@ import 'firebase_options.dart';
 import 'package:flutter/material.dart';
 import 'forms_select.dart';
 import 'dart:ui'; // Para ImageFilter
+import 'package:slide_to_act/slide_to_act.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,7 +46,7 @@ class WelcomeScreen extends StatelessWidget {
                 fit: BoxFit.contain,
               ),
               SizedBox(
-                height: 450,
+                height: 430,
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: ClipRect(
@@ -82,12 +83,11 @@ class WelcomeScreen extends StatelessWidget {
                           // Imagen del avión recortada
                           Positioned(
                             left: -380,
-                            top: -100,
+                            top: -165,
                             child: Image.asset(
                               'assets/Avion-one.png',
                               fit: BoxFit.contain,
                               height: 740,
-                             
                               alignment: Alignment.centerLeft,
                             ),
                           ),
@@ -98,30 +98,28 @@ class WelcomeScreen extends StatelessWidget {
                 ),
               ),
               
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const FormularioScreen(),
-                    ),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1F3A5F),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                ),
-                child: const Text(
-                  'COMENZAR',
-                  style: TextStyle(
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 5.0, vertical: 2.0),
+                child: SlideAction(
+                  text: 'COMENZAR',
+                  textStyle: const TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 19.13,
+                    fontSize: 15,
                     fontFamily: 'Avenir',
+                    color: Colors.white,
                   ),
+                  outerColor: const Color(0xFF1F3A5F),
+                  innerColor: const Color(0xFF598CBC),
+                  onSubmit: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const FormularioScreen(),
+                      ),
+                    );
+                  },
+                  elevation: 2,
+                  sliderButtonIcon: const Icon(Icons.arrow_forward, color: Colors.white),
                 ),
               ),
             ],
