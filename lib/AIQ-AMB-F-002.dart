@@ -83,7 +83,9 @@ class _AIQAMBF002ScreenState extends State<AIQAMBF002Screen> {
   }
 
   Future<void> guardarEnFirestore(String fechaHoy, String folioGenerado) async {
-    await FirebaseFirestore.instance.collection('AIQ-AMB-F-002').add({
+    await FirebaseFirestore.instance.collection('AIQ-AMB-F-002')
+    .doc(folioGenerado)
+    .set({
       'folio': folioGenerado,
       'fecha': fechaHoy,
       'fecha_seleccionada': _fechaSeleccionada != null

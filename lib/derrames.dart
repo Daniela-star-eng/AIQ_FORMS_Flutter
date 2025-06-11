@@ -10,6 +10,27 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:googleapis/drive/v3.dart' as drive;
+import 'package:googleapis_auth/auth_io.dart';
+import 'package:http/http.dart';
+
+class GoogleAuthClient extends BaseClient {
+  final Map<String, String> _headers;
+  final Client _client = Client();
+
+  GoogleAuthClient(this._headers);
+
+  @override
+  Future<StreamedResponse> send(BaseRequest request) {
+    return _client.send(request..headers.addAll(_headers));
+  }
+
+  @override
+  void close() {
+    _client.close();
+  }
+}
 
 class DerramesScreen extends StatefulWidget {
   const DerramesScreen({super.key});
@@ -133,6 +154,16 @@ class _DerramesScreenState extends State<DerramesScreen> {
     persona2NombreController.dispose();
     persona3NombreController.dispose();
     super.dispose();
+  }
+
+  String get formattedFecha {
+    // Usa la fecha seleccionada si existe, si no la de hoy
+    final DateTime fecha = fechaHoraNotificacion ?? DateTime.now();
+    return "${fecha.year.toString().padLeft(4, '0')}-${fecha.month.toString().padLeft(2, '0')}-${fecha.day.toString().padLeft(2, '0')}";
+  }
+
+  String get nombreDocumento {
+    return "AIQ-SMS-F013-$formattedFecha-$folio";
   }
 
   Future<void> _exportarPDF() async {
@@ -368,10 +399,10 @@ class _DerramesScreenState extends State<DerramesScreen> {
           ],
         ),
       );
-
+      
       // Guardar el PDF en un archivo temporal
       final output = await getTemporaryDirectory();
-      final file = File('${output.path}/reporte_derrames.pdf');
+      final file = File('${output.path}/$nombreDocumento.pdf');
       await file.writeAsBytes(await pdf.save());
 
       // Compartir el archivo
@@ -393,9 +424,9 @@ class _DerramesScreenState extends State<DerramesScreen> {
     final areaAfectadaValue = int.tryParse(areaAfectadaController.text) ?? 0;
     final tiempoMinutosValue = int.tryParse(tiempoMinutosController.text) ?? 0;
 
-    await FirebaseFirestore.instance.collection('derrames').doc(folio.toString()).set({
+    await FirebaseFirestore.instance.collection('AIQ-SMS-F013').doc(nombreDocumento).set({
       'folio': folio,
-      'fecha': fechaHoy,
+      'fecha': fechaHoy, 
       'nombreNotifica': nombreNotificaController.text,
       'ubicacion': ubicacionSeleccionada,
       'especificarUbicacion': especificarUbicacionController.text,
@@ -468,6 +499,7 @@ class _DerramesScreenState extends State<DerramesScreen> {
         _errorFirma2 ||
         _errorFirma3 ||
         _errorVueloMatricula) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Por favor llena todos los campos obligatorios')),
       );
@@ -475,8 +507,198 @@ class _DerramesScreenState extends State<DerramesScreen> {
     }
 
     await guardarFormulario();
-    await _exportarPDF();
+
+    // Genera y guarda el PDF localmente
+    final pdf = await _generarPDFyGuardar(); // Debes adaptar tu función para que retorne el File
+    if (pdf != null) {
+      await logoutGoogle(); // <-- Esto fuerza el logout
+      await subirPDFaDrive(pdf);
+      // El feedback de éxito/fracaso ya se da en subirPDFaDrive
+    }
+
     await _incrementarFolio();
+  }
+
+  Future<File?> _generarPDFyGuardar() async {
+    try {
+      final pdf = pw.Document();
+      final logoBytes = await rootBundle.load('assets/AIQ_LOGO_.png');
+      final logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
+
+      // Convertir firmas a imágenes (si existen)
+      final firma1Bytes = await firma1Controller.isNotEmpty ? await firma1Controller.toPngBytes() : null;
+      final firma2Bytes = await firma2Controller.isNotEmpty ? await firma2Controller.toPngBytes() : null;
+      final firma3Bytes = await firma3Controller.isNotEmpty ? await firma3Controller.toPngBytes() : null;
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(50),
+          build: (pw.Context context) => [
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.end,
+              children: [
+                pw.Image(logoImage, width: 90),
+              ],
+            ),
+            pw.SizedBox(height: 4),
+            pw.Header(
+              level: 0,
+              child: pw.Text(
+                'NEUTRALIZACION Y LIMPIEZA DE DERRAMES',
+                style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
+              ),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text('Folio: $folio    Fecha: $fechaHoy', style: pw.TextStyle(fontSize: 11)),
+            pw.Divider(),
+
+            pw.Text('Nombre de quien notifica: ${nombreNotificaController.text}', style: pw.TextStyle(fontSize: 12)),
+            pw.Text('Ubicación: ${ubicacionSeleccionada ?? ""}', style: pw.TextStyle(fontSize: 12)),
+            if (ubicacionSeleccionada == 'Otro')
+              pw.Text('Especificar ubicación: ${especificarUbicacionController.text}', style: pw.TextStyle(fontSize: 12)),
+
+            pw.SizedBox(height: 8),
+            pw.Text('Criticidad: ${getCriticidadTexto(criticidadValue)}', style: pw.TextStyle(fontSize: 12)),
+            pw.Text('Producto Derramado: ${productoSeleccionado ?? ""}', style: pw.TextStyle(fontSize: 12)),
+            if (productoSeleccionado == 'Otro')
+              pw.Text('Especificar producto: ${especificarProductoController.text}', style: pw.TextStyle(fontSize: 12)),
+            pw.Text('Originado por: ${originadoPorController.text}', style: pw.TextStyle(fontSize: 12)),
+            pw.Text('Vuelo/Matrícula/etc: ${vueloMatriculaController.text}', style: pw.TextStyle(fontSize: 12)),
+
+            pw.SizedBox(height: 8),
+            pw.Text('Materiales Utilizados', style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)),
+            pw.Table.fromTextArray(
+              headers: ['Espuma', 'Absorbente', 'Desengrasante', 'Agua'],
+              data: [
+                [
+                  '${cantidades[0]} lt',
+                  '${cantidades[1]} kg',
+                  '${cantidades[2]} lt',
+                  '${cantidades[3]} lt',
+                ]
+              ],
+            ),
+
+            pw.SizedBox(height: 8),
+            pw.Text('Área afectada: ${areaAfectadaController.text} m²', style: pw.TextStyle(fontSize: 12)),
+            pw.Text('Tiempo empleado: ${horasEmpleadas} h ${tiempoMinutosController.text} min', style: pw.TextStyle(fontSize: 12)),
+
+            pw.SizedBox(height: 8),
+            pw.Text('Causa del derrame:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+            pw.Text(causaController.text, style: pw.TextStyle(fontSize: 12)),
+
+            pw.SizedBox(height: 8),
+            pw.Text('Personal y vehículos que atienden:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+            pw.Text(personalController.text, style: pw.TextStyle(fontSize: 12)),
+
+            pw.SizedBox(height: 8),
+            pw.Text('Observaciones / Comentarios:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+            pw.Text(observacionesController.text, style: pw.TextStyle(fontSize: 12)),
+
+            pw.SizedBox(height: 16),
+            pw.Text('Firmas', style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
+              children: [
+                pw.Column(
+                  children: [
+                    pw.Text('Oficial/Operaciones:\n${persona1NombreController.text}', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 10)),
+                    if (firma1Bytes != null) pw.Image(pw.MemoryImage(firma1Bytes), width: 60, height: 30),
+                  ],
+                ),
+                pw.Column(
+                  children: [
+                    pw.Text('Personal SSEI:\n${persona2NombreController.text}', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 10)),
+                    if (firma2Bytes != null) pw.Image(pw.MemoryImage(firma2Bytes), width: 60, height: 30),
+                  ],
+                ),
+                pw.Column(
+                  children: [
+                    pw.Text('Empresa:\n${persona3NombreController.text}', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 10)),
+                    if (firma3Bytes != null) pw.Image(pw.MemoryImage(firma3Bytes), width: 60, height: 30),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+
+      final output = await getTemporaryDirectory();
+      final file = File('${output.path}/$nombreDocumento.pdf');
+      await file.writeAsBytes(await pdf.save());
+      return file;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al generar PDF: $e')),
+        );
+      }
+      return null;
+    }
+  }
+
+  //Google Drive - Comienza lo de Google Drive Para comenzar el login
+  Future<void> subirPDFaDrive(File pdfFile) async {
+    final googleSignIn = GoogleSignIn(
+      scopes: [drive.DriveApi.driveFileScope],
+    );
+    try {
+      final account = await googleSignIn.signIn();
+      if (account == null) {
+        // Usuario canceló el login
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Inicio de sesión cancelado. No se subió el PDF.')),
+        );
+        return;
+      }
+
+      final authHeaders = await account.authHeaders;
+      final authenticateClient = GoogleAuthClient(authHeaders);
+      final driveApi = drive.DriveApi(authenticateClient);
+
+      final media = drive.Media(pdfFile.openRead(), pdfFile.lengthSync());
+      final driveFile = drive.File();
+      driveFile.name = '$nombreDocumento.pdf';
+      driveFile.parents = ['19OnlCEtrpzbWd8OEViZyTha11OZRuDY_'];
+
+      final response = await driveApi.files.create(
+        driveFile,
+        uploadMedia: media,
+      );
+      final fileId = response.id;
+      final fileUrl = 'https://drive.google.com/file/d/$fileId/view';
+      print('Archivo subido: $fileUrl');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('PDF subido a Google Drive.\nAbrir: $fileUrl'),
+          action: SnackBarAction(
+            label: 'Abrir',
+            onPressed: () async {
+              // Si tienes url_launcher, puedes abrir el enlace así:
+              // await launchUrl(Uri.parse(fileUrl));
+            },
+          ),
+          duration: const Duration(seconds: 8),
+        ),
+      );
+    } catch (e) {
+      print('Error al subir PDF a Drive: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al subir PDF a Drive: $e')),
+      );
+    }
+  }
+
+  Future<void> logoutGoogle() async {
+    final googleSignIn = GoogleSignIn(
+      scopes: [drive.DriveApi.driveFileScope],
+    );
+    await googleSignIn.signOut();
   }
 
   @override

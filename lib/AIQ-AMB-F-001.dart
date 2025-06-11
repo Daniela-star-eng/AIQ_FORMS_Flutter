@@ -1,10 +1,34 @@
+// ignore: file_names
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:signature/signature.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:googleapis/drive/v3.dart' as drive;
+import 'package:googleapis_auth/auth_io.dart';
+import 'package:http/http.dart';
+
+class GoogleAuthClient extends BaseClient {
+  final Map<String, String> _headers;
+  final Client _client = Client();
+
+  GoogleAuthClient(this._headers);
+
+  @override
+  Future<StreamedResponse> send(BaseRequest request) {
+    return _client.send(request..headers.addAll(_headers));
+  }
+
+  @override
+  void close() {
+    _client.close();
+  }
+}
 
 class AIQAMBF001Screen extends StatefulWidget {
   const AIQAMBF001Screen({super.key});
@@ -44,6 +68,9 @@ class _AIQAMBF001ScreenState extends State<AIQAMBF001Screen> {
   bool _errorNombre = false;
   bool _errorFirma = false;
 
+  int consecutivoMostrado = 1;
+  String nombreDocumento = "AIQ-AMB-F-001";
+  
   @override
   void initState() {
     super.initState();
@@ -98,9 +125,12 @@ class _AIQAMBF001ScreenState extends State<AIQAMBF001Screen> {
         _errorFirma);
   }
 
-  Future<void> guardarEnFirestore(String fechaHoy) async {
-    await FirebaseFirestore.instance.collection('AIQ-AMB-F-001').add({
-      'folio': folio,
+  Future<void> guardarEnFirestore(String fechaHoy, String folioGenerado) async {
+    await FirebaseFirestore.instance
+        .collection('AIQ-AMB-F-001')
+        .doc(folioGenerado) // El ID será el folio generado
+        .set({
+      'folio': folioGenerado,
       'fecha': fechaHoy,
       'ubicacion': ubicacionController.text.trim(),
       'especie': especieController.text.trim(),
@@ -119,7 +149,9 @@ class _AIQAMBF001ScreenState extends State<AIQAMBF001Screen> {
     });
   }
 
-  Future<void> _exportarPDF(String fechaHoy) async {
+  
+
+  Future<void> _exportarPDF(String fechaHoy, String folioGenerado) async {
     final pdf = pw.Document();
     final firma1Bytes = firma1Controller.isNotEmpty ? await firma1Controller.toPngBytes() : null;
 
@@ -135,7 +167,7 @@ class _AIQAMBF001ScreenState extends State<AIQAMBF001Screen> {
               style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
             ),
           ),
-          pw.Text('Folio: $folio    Fecha: $fechaHoy', style: pw.TextStyle(fontSize: 11)),
+          pw.Text('Folio: $folioGenerado    Fecha: $fechaHoy', style: pw.TextStyle(fontSize: 11)),
           pw.Divider(),
 
           pw.Text('Ubicación: ${ubicacionController.text}', style: pw.TextStyle(fontSize: 12)),
@@ -168,6 +200,24 @@ class _AIQAMBF001ScreenState extends State<AIQAMBF001Screen> {
     );
   }
 
+  Future<File?> _generarPDFyGuardar() async {
+  try {
+    final pdf = pw.Document();
+    // ...tu código para construir el PDF...
+    final output = await getTemporaryDirectory();
+    final file = File('${output.path}/reporte_derrames.pdf');
+    await file.writeAsBytes(await pdf.save());
+    return file;
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al generar PDF: $e')),
+      );
+    }
+    return null;
+  }
+}
+
   void limpiarCampos() {
     ubicacionController.clear();
     especieController.clear();
@@ -177,6 +227,10 @@ class _AIQAMBF001ScreenState extends State<AIQAMBF001Screen> {
     observacionesController.clear();
     persona1NombreController.clear();
     firma1Controller.clear();
+    _fechaSeleccionada = null;
+    _horaSeleccionada = null;
+    consecutivoMostrado = 1;
+    setState(() {});
   }
 
   void guardarYExportar() async {
@@ -194,8 +248,9 @@ class _AIQAMBF001ScreenState extends State<AIQAMBF001Screen> {
         "${DateTime.now().month.toString().padLeft(2, '0')}/"
         "${DateTime.now().year}";
     try {
-      await guardarEnFirestore(fechaHoy);
-      await _exportarPDF(fechaHoy);
+      final folioGenerado = await generarFolio();
+      await guardarEnFirestore(fechaHoy, folioGenerado); // El ID será el folio
+      await _exportarPDF(fechaHoy, folioGenerado);
       await _incrementarFolio();
       limpiarCampos();
       if (mounted) {
@@ -213,6 +268,42 @@ class _AIQAMBF001ScreenState extends State<AIQAMBF001Screen> {
       if (mounted) setState(() => _isSaving = false);
     }
   }
+
+
+  //Google Drive - Comienza lo de Google Drive Para comenzar el login
+  Future<void> subirPDFaDrive(File pdfFile) async {
+    final googleSignIn = GoogleSignIn(
+      scopes: [drive.DriveApi.driveFileScope],
+    );
+
+    final account = await googleSignIn.signIn();
+    if (account == null) {
+      // Usuario canceló el login
+      return;
+    }
+
+    final authHeaders = await account.authHeaders;
+    final authenticateClient = GoogleAuthClient(authHeaders);
+
+    final driveApi = drive.DriveApi(authenticateClient);
+
+    final media = drive.Media(pdfFile.openRead(), pdfFile.lengthSync());
+    final driveFile = drive.File();
+    driveFile.name = pdfFile.path.split('/').last;
+
+    await driveApi.files.create(
+      driveFile,
+      uploadMedia: media,
+    );
+  }
+
+  Future<void> logoutGoogle() async {
+    final googleSignIn = GoogleSignIn(
+      scopes: [drive.DriveApi.driveFileScope],
+    );
+    await googleSignIn.signOut();
+  }
+
 
   // NUEVO: Métodos para seleccionar fecha y hora
   Future<void> _seleccionarFecha() async {
@@ -234,8 +325,10 @@ class _AIQAMBF001ScreenState extends State<AIQAMBF001Screen> {
     );
 
     if (fecha != null) {
+      final consecutivo = await obtenerConsecutivoParaFecha(fecha);
       setState(() {
         _fechaSeleccionada = fecha;
+        consecutivoMostrado = consecutivo;
         _errorFecha = false;
       });
     }
@@ -263,6 +356,36 @@ class _AIQAMBF001ScreenState extends State<AIQAMBF001Screen> {
         _errorHora = false;
       });
     }
+  }
+
+  Future<String> generarFolio() async {
+    if (_fechaSeleccionada == null) return "";
+    final dia = _fechaSeleccionada!.day.toString().padLeft(2, '0');
+    final mes = _fechaSeleccionada!.month.toString().padLeft(2, '0');
+    final anio = _fechaSeleccionada!.year.toString();
+    final fechaStr = "$dia/$mes/$anio";
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('AIQ-AMB-F-001')
+        .where('fecha_seleccionada', isEqualTo: fechaStr)
+        .get();
+
+    final consecutivo = snapshot.docs.length + 1;
+    return "AIQAMBF001-$dia-$mes-$anio-$consecutivo";
+  }
+
+  Future<int> obtenerConsecutivoParaFecha(DateTime fecha) async {
+    final dia = fecha.day.toString().padLeft(2, '0');
+    final mes = fecha.month.toString().padLeft(2, '0');
+    final anio = fecha.year.toString();
+    final fechaStr = "$dia/$mes/$anio";
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('AIQ-AMB-F-001')
+        .where('fecha_seleccionada', isEqualTo: fechaStr)
+        .get();
+
+    return snapshot.docs.length + 1;
   }
 
   @override
@@ -375,7 +498,7 @@ class _AIQAMBF001ScreenState extends State<AIQAMBF001Screen> {
                       child: Text(
                         "AIQAMBF001-${_fechaSeleccionada != null
                             ? "${_fechaSeleccionada!.day.toString().padLeft(2, '0')}-${_fechaSeleccionada!.month.toString().padLeft(2, '0')}-${_fechaSeleccionada!.year}"
-                            : "--/--/----"}-$folio",
+                            : "--/--/----"}-$consecutivoMostrado",
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Color(0xFF263A5B),

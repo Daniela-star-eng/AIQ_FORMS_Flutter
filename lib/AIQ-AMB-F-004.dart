@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
-import 'package:excel/excel.dart';
+import 'package:excel/excel.dart' as ex;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
@@ -38,6 +38,9 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
   String? resultadoSeleccionado;
 
   int folio = 1;
+  int consecutivoMostrado = 1;
+  
+  get folioGenerado => null;
 
   @override
   void dispose() {
@@ -56,9 +59,12 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
     });
 
     if (_formKey.currentState!.validate() && !_errorFirma) {
-      // Guarda en Firestore
-      await FirebaseFirestore.instance.collection('AIQ_AMB_F-004').add({
-        'folio': folio,
+      final folioGenerado = await generarFolio();
+      await FirebaseFirestore.instance
+          .collection('AIQ-AMB-F-004')
+          .doc(folioGenerado) // <--- El ID será el folio
+          .set({
+        'folio': folioGenerado,
         'fecha': fechaController.text,
         'hora': horaController.text,
         'ubicacion': campo1Controller.text,
@@ -68,6 +74,8 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
         'nombre_prestador': campo3Controller.text,
         'fecha_registro': FieldValue.serverTimestamp(),
       });
+
+      await _generarPDF(folioGenerado);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Formulario guardado en Firebase')),
@@ -105,9 +113,8 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
     await Share.share('Folio del formulario: $folio');
   }
 
-  Future<void> _generarPDF() async {
+  Future<void> _generarPDF(String folioGenerado) async {
     final pdf = pw.Document();
-
     final logoBytes = await rootBundle.load('assets/AIQ_LOGO_.png');
     final logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
     final firmaBytes = await firmaController.isNotEmpty ? await firmaController.toPngBytes() : null;
@@ -153,7 +160,7 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
-              pw.Text('Folio: $folio', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+              pw.Text('Folio: $folioGenerado', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
               pw.Text('Fecha: ${fechaController.text}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
               pw.Text('Hora: ${horaController.text}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
             ],
@@ -265,12 +272,12 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
     final filePath = '${directory.path}/AIQ_AMB_F_004.xlsx';
     final file = File(filePath);
 
-    Excel excel;
+    ex.Excel excel;
     if (await file.exists()) {
       var bytes = await file.readAsBytes();
-      excel = Excel.decodeBytes(bytes);
+      excel = ex.Excel.decodeBytes(bytes);
     } else {
-      excel = Excel.createExcel();
+      excel = ex.Excel.createExcel();
       excel.rename('Sheet1', 'Registros');
       excel['Registros'].appendRow([
         'Folio', 'Fecha', 'Hora', 'Ubicación', 'Jaula', 'Especie', 'Resultado', 'Nombre Prestador'
@@ -316,6 +323,44 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
         const SnackBar(content: Text('No hay archivo Excel generado aún')),
       );
     }
+  }
+
+  Future<int> obtenerConsecutivoParaFecha(DateTime fecha) async {
+    final dia = fecha.day.toString().padLeft(2, '0');
+    final mes = fecha.month.toString().padLeft(2, '0');
+    final anio = fecha.year.toString();
+    final fechaStr = "$dia/$mes/$anio";
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('AIQ-AMB-F-004')
+        .where('fecha', isEqualTo: fechaStr)
+        .get();
+
+    return snapshot.docs.length + 1;
+  }
+
+  Future<String> generarFolio() async {
+    if (fechaSeleccionada == null) return "";
+    final dia = fechaSeleccionada!.day.toString().padLeft(2, '0');
+    final mes = fechaSeleccionada!.month.toString().padLeft(2, '0');
+    final anio = fechaSeleccionada!.year.toString();
+    final consecutivo = consecutivoMostrado;
+    return "AIQAMBF004-$dia-$mes-$anio-$consecutivo";
+  }
+
+  void limpiarCampos() {
+    campo1Controller.clear();
+    campo2Controller.clear();
+    campo3Controller.clear();
+    fechaController.clear();
+    horaController.clear();
+    jaulaSeleccionada = null;
+    resultadoSeleccionado = null;
+    firmaController.clear();
+    fechaSeleccionada = null;
+    horaSeleccionada = null;
+    consecutivoMostrado = 1;
+    setState(() {});
   }
 
   @override
@@ -367,7 +412,7 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
                     ),
                   ),
                   const Text(
-                    "AIQ_AMB-F-004",
+                    "AIQ-AMB-F-004",
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w500,
@@ -377,18 +422,33 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
-                  Text("Folio: $folio", style: const TextStyle(fontSize: 16, color: Color(0xFF263A5B))),
-                  const SizedBox(height: 24),
-                  // Aquí puedes poner un folio, fecha, etc.
-                  // Ejemplo:
-                  // Fecha y hora
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF598CBC)),
+                    ),
+                    child: Text(
+                      "AIQAMBF004-${fechaSeleccionada != null
+                          ? "${fechaSeleccionada!.day.toString().padLeft(2, '0')}-${fechaSeleccionada!.month.toString().padLeft(2, '0')}-${fechaSeleccionada!.year}"
+                          : "--/--/----"}-$consecutivoMostrado",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF263A5B),
+                        fontSize: 14,
+                        fontFamily: 'Avenir',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 5),
                   Container(
                     decoration: BoxDecoration(
                       color: const Color(0xFFC2C8D9), // Fondo azul claro
                       borderRadius: BorderRadius.circular(12),
                     ),
                     padding: const EdgeInsets.all(16),
-                    margin: const EdgeInsets.only(bottom: 24),
+                    
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -429,12 +489,14 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
                                     lastDate: DateTime(2100),
                                   );
                                   if (picked != null) {
+                                    final consecutivo = await obtenerConsecutivoParaFecha(picked);
                                     setState(() {
                                       fechaSeleccionada = picked;
                                       fechaController.text =
                                           "${picked.day.toString().padLeft(2, '0')}/"
                                           "${picked.month.toString().padLeft(2, '0')}/"
                                           "${picked.year}";
+                                      consecutivoMostrado = consecutivo;
                                     });
                                   }
                                 },

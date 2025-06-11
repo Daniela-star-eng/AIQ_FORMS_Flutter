@@ -24,6 +24,9 @@ dependencies:
   excel: ^2.1.0
   slide_to_act: ^2.0.1
   open_file: ^3.3.2
+  googleapis: ^13.1.0 
+  googleapis_auth: ^1.4.0
+  google_sign_in: ^6.2.1
 
 dev_dependencies:
   flutter_test:
