@@ -1,10 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:signature/signature.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-import 'package:pdf/pdf.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class AIQAMBF002Screen extends StatefulWidget {
   const AIQAMBF002Screen({super.key});
@@ -99,152 +98,6 @@ class _AIQAMBF002ScreenState extends State<AIQAMBF002Screen> {
       'nombre_firma': persona1NombreController.text.trim(),
       'timestamp': FieldValue.serverTimestamp(),
     });
-  }
-
-  Future<void> _exportarPDF(String fechaHoy, String folioGenerado) async {
-    final pdf = pw.Document();
-    final firma1Bytes = firma1Controller.isNotEmpty ? await firma1Controller.toPngBytes() : null;
-
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(50),
-        build: (pw.Context context) => [
-          pw.Header(
-            level: 0,
-            child: pw.Text(
-              'MONITOREO DE HABITAD',
-              style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
-            ),
-          ),
-          pw.Text('Folio: $folioGenerado    Fecha: $fechaHoy', style: pw.TextStyle(fontSize: 11)),
-          pw.Text(
-            'Fecha seleccionada: ${_fechaSeleccionada != null ? "${_fechaSeleccionada!.day.toString().padLeft(2, '0')}/${_fechaSeleccionada!.month.toString().padLeft(2, '0')}/${_fechaSeleccionada!.year}" : ""}',
-            style: pw.TextStyle(fontSize: 12),
-          ),
-          pw.Text(
-            'Hora seleccionada: ${_horaSeleccionada != null ? "${_horaSeleccionada!.hour.toString().padLeft(2, '0')}:${_horaSeleccionada!.minute.toString().padLeft(2, '0')}" : ""}',
-            style: pw.TextStyle(fontSize: 12),
-          ),
-          pw.Divider(),
-          pw.Text('Vegetación / Infraestructura: ${vegetacionInfraestructuraController.text}', style: pw.TextStyle(fontSize: 12)),
-          pw.SizedBox(height: 8),
-          pw.Text('Resultados y comentarios:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
-          pw.Text(resultadosComentariosController.text, style: pw.TextStyle(fontSize: 12)),
-          pw.SizedBox(height: 16),
-          pw.Text('Firma', style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)),
-          pw.Text('Nombre: ${persona1NombreController.text}', style: pw.TextStyle(fontSize: 12)),
-          if (firma1Bytes != null)
-            pw.Padding(
-              padding: const pw.EdgeInsets.only(top: 8),
-              child: pw.Image(pw.MemoryImage(firma1Bytes), width: 120, height: 40),
-            ),
-        ],
-      ),
-    );
-
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdf.save(),
-    );
-  }
-
-  void limpiarCampos() {
-    _fechaSeleccionada = null;
-    _horaSeleccionada = null;
-    vegetacionInfraestructuraController.clear();
-    resultadosComentariosController.clear();
-    persona1NombreController.clear();
-    firma1Controller.clear();
-    setState(() {});
-  }
-
-  void guardarYExportar() async {
-    if (_isSaving) return;
-    if (!validarCampos()) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Por favor, completa todos los campos obligatorios y la firma')),
-        );
-      }
-      return;
-    }
-    setState(() => _isSaving = true);
-    final fechaHoy = "${DateTime.now().day.toString().padLeft(2, '0')}/"
-        "${DateTime.now().month.toString().padLeft(2, '0')}/"
-        "${DateTime.now().year}";
-    try {
-      final folioGenerado = await generarFolio(); // <-- Aquí generas el folio único
-
-      await guardarEnFirestore(fechaHoy, folioGenerado); // <-- Pásalo a guardar
-      await _exportarPDF(fechaHoy, folioGenerado); // <-- Pásalo a exportar PDF si lo usas ahí
-      await _incrementarFolio();
-      limpiarCampos();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Formulario guardado y exportado correctamente')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al guardar/exportar: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
-  Future<void> _seleccionarFecha() async {
-    final fecha = await showDatePicker(
-      context: context,
-      initialDate: _fechaSeleccionada ?? DateTime.now(),
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
-      builder: (context, child) {
-        return Theme(
-          data: ThemeData.light().copyWith(
-            primaryColor: const Color(0xFF598CBC),
-            colorScheme: ColorScheme.light(primary: const Color(0xFF598CBC)),
-            buttonTheme: const ButtonThemeData(textTheme: ButtonTextTheme.primary),
-          ),
-          child: child!,
-        );
-      },
-    );
-
-    if (fecha != null) {
-      final consecutivo = await obtenerConsecutivoParaFecha(fecha);
-      setState(() {
-        _fechaSeleccionada = fecha;
-        consecutivoMostrado = consecutivo;
-        _errorFecha = false;
-      });
-    }
-  }
-
-  Future<void> _seleccionarHora() async {
-    final hora = await showTimePicker(
-      context: context,
-      initialTime: _horaSeleccionada ?? TimeOfDay.now(),
-      builder: (context, child) {
-        return Theme(
-          data: ThemeData.light().copyWith(
-            primaryColor: const Color(0xFF598CBC),
-            colorScheme: ColorScheme.light(primary: const Color(0xFF598CBC)),
-            buttonTheme: const ButtonThemeData(textTheme: ButtonTextTheme.primary),
-          ),
-          child: child!,
-        );
-      },
-    );
-
-    if (hora != null) {
-      setState(() {
-        _horaSeleccionada = hora;
-        _errorHora = false;
-      });
-    }
   }
 
   Future<String> generarFolio() async {
@@ -651,5 +504,102 @@ class _AIQAMBF002ScreenState extends State<AIQAMBF002Screen> {
         ),
       ],
     );
+  }
+
+  void limpiarCampos() {
+    _fechaSeleccionada = null;
+    _horaSeleccionada = null;
+    vegetacionInfraestructuraController.clear();
+    resultadosComentariosController.clear();
+    persona1NombreController.clear();
+    firma1Controller.clear();
+    setState(() {});
+  }
+
+  void guardarYExportar() async {
+    if (_isSaving) return;
+    if (!validarCampos()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Por favor, completa todos los campos obligatorios y la firma')),
+        );
+      }
+      return;
+    }
+    setState(() => _isSaving = true);
+    final fechaHoy = "${DateTime.now().day.toString().padLeft(2, '0')}/"
+        "${DateTime.now().month.toString().padLeft(2, '0')}/"
+        "${DateTime.now().year}";
+    try {
+      final folioGenerado = await generarFolio();
+      await guardarEnFirestore(fechaHoy, folioGenerado);
+      await _incrementarFolio();
+      limpiarCampos();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Formulario guardado correctamente')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al guardar: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _seleccionarFecha() async {
+    final fecha = await showDatePicker(
+      context: context,
+      initialDate: _fechaSeleccionada ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      builder: (context, child) {
+        return Theme(
+          data: ThemeData.light().copyWith(
+            primaryColor: const Color(0xFF598CBC),
+            colorScheme: ColorScheme.light(primary: const Color(0xFF598CBC)),
+            buttonTheme: const ButtonThemeData(textTheme: ButtonTextTheme.primary),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (fecha != null) {
+      final consecutivo = await obtenerConsecutivoParaFecha(fecha);
+      setState(() {
+        _fechaSeleccionada = fecha;
+        consecutivoMostrado = consecutivo;
+        _errorFecha = false;
+      });
+    }
+  }
+
+  Future<void> _seleccionarHora() async {
+    final hora = await showTimePicker(
+      context: context,
+      initialTime: _horaSeleccionada ?? TimeOfDay.now(),
+      builder: (context, child) {
+        return Theme(
+          data: ThemeData.light().copyWith(
+            primaryColor: const Color(0xFF598CBC),
+            colorScheme: ColorScheme.light(primary: const Color(0xFF598CBC)),
+            buttonTheme: const ButtonThemeData(textTheme: ButtonTextTheme.primary),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (hora != null) {
+      setState(() {
+        _horaSeleccionada = hora;
+        _errorHora = false;
+      });
+    }
   }
 }

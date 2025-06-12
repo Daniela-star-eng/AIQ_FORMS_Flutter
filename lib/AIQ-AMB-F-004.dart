@@ -11,15 +11,59 @@ import 'package:printing/printing.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:open_file/open_file.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:googleapis/drive/v3.dart' as drive;
+import 'package:http/http.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-class AIQ_AMB_F_004 extends StatefulWidget {
-  const AIQ_AMB_F_004({super.key});
-
+class GoogleAuthClient extends BaseClient {
+  final Map<String, String> _headers;
+  final Client _client = Client();
+  GoogleAuthClient(this._headers);
   @override
-  State<AIQ_AMB_F_004> createState() => _AIQ_AMB_F_004State();
+  Future<StreamedResponse> send(BaseRequest request) {
+    return _client.send(request..headers.addAll(_headers));
+  }
+  @override
+  void close() {
+    _client.close();
+  }
 }
 
-class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
+Future<String?> subirPDFaDriveEnCarpeta(File pdfFile, String folderId) async {
+  final googleSignIn = GoogleSignIn(
+    scopes: ['https://www.googleapis.com/auth/drive.file'],
+  );
+  final account = await googleSignIn.signIn();
+  if (account == null) return null;
+  final authHeaders = await account.authHeaders;
+  final authenticateClient = GoogleAuthClient(authHeaders);
+  final driveApi = drive.DriveApi(authenticateClient);
+  final media = drive.Media(pdfFile.openRead(), pdfFile.lengthSync());
+  final driveFile = drive.File();
+  driveFile.name = pdfFile.path.split('/').last;
+  driveFile.parents = [folderId];
+  final uploaded = await driveApi.files.create(
+    driveFile,
+    uploadMedia: media,
+  );
+  await driveApi.permissions.create(
+    drive.Permission()
+      ..type = 'anyone'
+      ..role = 'reader',
+    uploaded.id!,
+  );
+  return 'https://drive.google.com/file/d/${uploaded.id}/view?usp=sharing';
+}
+
+class AIQAMBF004Screen extends StatefulWidget {
+  const AIQAMBF004Screen({super.key});
+
+  @override
+  State<AIQAMBF004Screen> createState() => _AIQAMBF004ScreenState();
+}
+
+class _AIQAMBF004ScreenState extends State<AIQAMBF004Screen> {
   final _formKey = GlobalKey<FormState>();
 
   final TextEditingController campo1Controller = TextEditingController();
@@ -62,7 +106,7 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
       final folioGenerado = await generarFolio();
       await FirebaseFirestore.instance
           .collection('AIQ-AMB-F-004')
-          .doc(folioGenerado) // <--- El ID será el folio
+          .doc(folioGenerado)
           .set({
         'folio': folioGenerado,
         'fecha': fechaController.text,
@@ -75,10 +119,29 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
         'fecha_registro': FieldValue.serverTimestamp(),
       });
 
-      await _generarPDF(folioGenerado);
+      // Generar PDF y subir a Drive
+      final pdfFile = await _generarPDFyGuardar(folioGenerado);
+      const folderId = '1ma4p1ascNRZA79_VikCNJvznxzC_J4VX'; // <-- Cambia esto por el ID de tu carpeta de Drive
+      String? driveLink;
+      if (pdfFile != null) {
+        driveLink = await subirPDFaDriveEnCarpeta(pdfFile, folderId);
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Formulario guardado en Firebase')),
+        SnackBar(
+          content: Text(driveLink != null
+              ? 'Formulario guardado y PDF subido a Drive'
+              : 'Formulario guardado, pero no se pudo subir el PDF a Drive'),
+          action: driveLink != null
+              ? SnackBarAction(
+                  label: 'Ver PDF',
+                  onPressed: () async {
+                    // ignore: deprecated_member_use
+                    await launch(driveLink!);
+                  },
+                )
+              : null,
+        ),
       );
 
       await _incrementarFolio();
@@ -267,6 +330,169 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
     );
   }
 
+  Future<File?> _generarPDFyGuardar(String folioGenerado) async {
+    try {
+      final pdf = pw.Document();
+      final logoBytes = await rootBundle.load('assets/AIQ_LOGO_.png');
+      final logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
+      final firmaBytes = await firmaController.isNotEmpty ? await firmaController.toPngBytes() : null;
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          build: (pw.Context context) => [
+            // Encabezado
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Image(logoImage, width: 80),
+                pw.Column(
+                  children: [
+                    pw.Text(
+                      'AIQ_AMB-F-004',
+                      style: pw.TextStyle(
+                        fontSize: 20,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColor.fromInt(0xFF263A5B),
+                      ),
+                    ),
+                    pw.Text(
+                      'REGISTRO DE CAPTURA DE FAUNA',
+                      style: pw.TextStyle(
+                        fontSize: 16,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColor.fromInt(0xFF598CBC),
+                      ),
+                    ),
+                  ],
+                ),
+                pw.SizedBox(width: 80),
+              ],
+            ),
+            pw.SizedBox(height: 16),
+            pw.Divider(),
+
+            // Folio y fecha/hora
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Folio: $folioGenerado', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.Text('Fecha: ${fechaController.text}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.Text('Hora: ${horaController.text}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+            pw.SizedBox(height: 16),
+
+            // Tabla de datos principales
+            pw.Table(
+              border: pw.TableBorder.all(color: PdfColor.fromInt(0xFFC2C8D9), width: 1),
+              columnWidths: {
+                0: const pw.FlexColumnWidth(2),
+                1: const pw.FlexColumnWidth(4),
+              },
+              children: [
+                pw.TableRow(
+                  decoration: pw.BoxDecoration(color: PdfColor.fromInt(0xFFE8EAF2)),
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Ubicación:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text(campo1Controller.text),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Jaula:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text(jaulaSeleccionada ?? ''),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  decoration: pw.BoxDecoration(color: PdfColor.fromInt(0xFFE8EAF2)),
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Especie capturada:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text(campo2Controller.text),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Resultados y comentarios:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text(resultadoSeleccionado ?? ''),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 24),
+
+            // Nombre y firma
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('Nombre del prestador:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                    pw.Text(campo3Controller.text),
+                  ],
+                ),
+                if (firmaBytes != null)
+                  pw.Column(
+                    children: [
+                      pw.Text('Firma:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                      pw.SizedBox(height: 4),
+                      pw.Image(pw.MemoryImage(firmaBytes), width: 120, height: 60),
+                    ],
+                  ),
+              ],
+            ),
+            pw.SizedBox(height: 16),
+            pw.Divider(),
+            pw.SizedBox(height: 8),
+            pw.Text(
+              'Exportado por AIQ-Forms',
+              style: pw.TextStyle(fontSize: 10, color: PdfColor.fromInt(0xFF598CBC)),
+            ),
+          ],
+        ),
+      );
+      final output = await getTemporaryDirectory();
+      final fechaSafe = fechaController.text.replaceAll('/', '-');
+      final file = File('${output.path}/$folioGenerado.pdf');
+      await file.writeAsBytes(await pdf.save());
+      return file;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al generar PDF: $e')),
+        );
+      }
+      return null;
+    }
+  }
+
   Future<void> guardarEnExcel() async {
     final directory = await getApplicationDocumentsDirectory();
     final filePath = '${directory.path}/AIQ_AMB_F_004.xlsx';
@@ -389,7 +615,7 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          "TÍTULO DEL FORMULARIO",
+                          "REVISIÓN CEBADO Y SEGUIMIENTO DE TRAMPAS DE CAPTURA",
                           style: TextStyle(
                             fontSize: 26,
                             fontWeight: FontWeight.bold,
@@ -399,7 +625,7 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
                           textAlign: TextAlign.left,
                         ),
                         Text(
-                          "SUBTÍTULO O DESCRIPCIÓN",
+                          "AIQ-AMB-F-004",
                           style: TextStyle(
                             fontSize: 26,
                             fontWeight: FontWeight.bold,
@@ -410,16 +636,6 @@ class _AIQ_AMB_F_004State extends State<AIQ_AMB_F_004> {
                         ),
                       ],
                     ),
-                  ),
-                  const Text(
-                    "AIQ-AMB-F-004",
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF263A5B),
-                      fontFamily: 'Avenir',
-                    ),
-                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
                   Container(

@@ -9,6 +9,10 @@ import 'package:signature/signature.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:googleapis/drive/v3.dart' as drive;
+import 'package:http/http.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class AIQOPSF008Screen extends StatefulWidget {
   const AIQOPSF008Screen({super.key});
@@ -33,6 +37,47 @@ class AIQOPSF008ListScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+class GoogleAuthClient extends BaseClient {
+  final Map<String, String> _headers;
+  final Client _client = Client();
+  GoogleAuthClient(this._headers);
+  @override
+  Future<StreamedResponse> send(BaseRequest request) {
+    return _client.send(request..headers.addAll(_headers));
+  }
+  @override
+  void close() {
+    _client.close();
+  }
+}
+
+Future<String?> subirPDFaDriveEnCarpeta(File pdfFile, String folderId) async {
+  final googleSignIn = GoogleSignIn(
+    scopes: ['https://www.googleapis.com/auth/drive.file'],
+  );
+  await googleSignIn.signOut(); // Permite elegir cuenta cada vez
+  final account = await googleSignIn.signIn();
+  if (account == null) return null;
+  final authHeaders = await account.authHeaders;
+  final authenticateClient = GoogleAuthClient(authHeaders);
+  final driveApi = drive.DriveApi(authenticateClient);
+  final media = drive.Media(pdfFile.openRead(), pdfFile.lengthSync());
+  final driveFile = drive.File();
+  driveFile.name = pdfFile.path.split('/').last;
+  driveFile.parents = [folderId];
+  final uploaded = await driveApi.files.create(
+    driveFile,
+    uploadMedia: media,
+  );
+  await driveApi.permissions.create(
+    drive.Permission()
+      ..type = 'anyone'
+      ..role = 'reader',
+    uploaded.id!,
+  );
+  return 'https://drive.google.com/file/d/${uploaded.id}/view?usp=sharing';
 }
 
 class _AIQOPSF008ScreenState extends State<AIQOPSF008Screen> {
@@ -827,232 +872,28 @@ class _AIQOPSF008ScreenState extends State<AIQOPSF008Screen> {
   final logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
 
   final fechaGeneracion = DateTime.now();
-  final fechaStr = "${fechaGeneracion.day.toString().padLeft(2, '0')}/"
-      "${fechaGeneracion.month.toString().padLeft(2, '0')}/"
+  final fechaStr = "${fechaGeneracion.day.toString().padLeft(2, '0')}-"
+      "${fechaGeneracion.month.toString().padLeft(2, '0')}-"
       "${fechaGeneracion.year}";
+  final output = await getTemporaryDirectory();
+  final file = File('${output.path}/AIQ-OPS-F008-$fechaStr-$folio.pdf');
+  await file.writeAsBytes(await pdf.save());
 
-  // Define las secciones y sus ítems igual que en tu formulario
-  final List<Map<String, dynamic>> secciones = [
-    {
-      "titulo": "VEHÍCULOS TERRESTRES",
-      "items": [
-        "Acercamiento a los segmentos",
-        "Procedimientos",
-        "Observaciones"
-      ]
-    },
-    {
-      "titulo": "OPERACIONES DE ABASTECIMIENTO DE COMBUSTIBLE",
-      "items": [
-        "Peligros de Incendio / Explosión",
-        "Procedimientos",
-        "Conexiones a tierra",
-        "Letrero de 'NO FUMAR'",
-        "Observaciones"
-      ]
-    },
-    {
-      "titulo": "CONSTRUCCIÓN",
-      "items": [
-        "Plan de seguridad",
-        "Riesgos en áreas públicas y colindantes",
-        "Observaciones"
-      ]
-    },
-    {
-      "titulo": "ACCESOS",
-      "items": [
-        "Personas NO Autorizadas",
-        "Vehículos NO Autorizados",
-        "Puertas libres",
-        "Peatones en zona de movimiento de aeronaves",
-        "Embarque y desembarque de pasajeros",
-        "Accesos en zonas de aeronaves",
-        "Observaciones"
-      ]
-    },
-    {
-      "titulo": "PELIGRO DE FAUNA",
-      "items": [
-        "Aves",
-        "Animales",
-        "Observaciones"
-      ]
-    },
-    {
-      "titulo": "ACCESOS INFORME",
-      "items": [
-        "LIL",
-        "CP",
-        "Observaciones"
-      ]
-    },
-  ];
-
-  // Obtener la firma antes de construir el PDF
-  Uint8List? signatureBytes;
-  if (enteradoFirmaController.isNotEmpty) {
-    signatureBytes = await enteradoFirmaController.toPngBytes();
+  // Subir a Google Drive automáticamente
+  const folderId = 'TU_ID_DE_CARPETA_DRIVE'; // <-- Cambia esto por tu ID real
+  final link = await subirPDFaDriveEnCarpeta(file, folderId);
+  if (link != null && mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('PDF subido a Google Drive. ¡Haz clic para abrir el enlace!'),
+        action: SnackBarAction(
+          label: 'Abrir',
+          onPressed: () => launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication),
+        ),
+        duration: Duration(seconds: 8),
+      ),
+    );
   }
-
-  pdf.addPage(
-    pw.MultiPage(
-      pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.all(24),
-      build: (pw.Context context) => [
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          children: [
-            pw.Text('Folio: $folio', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14, color: PdfColor.fromInt(0xFF263A5B))),
-            pw.Text('Fecha: $fechaStr', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14, color: PdfColor.fromInt(0xFF263A5B))),
-            pw.Image(logoImage, width: 70),
-          ],
-        ),
-        pw.SizedBox(height: 4),
-        pw.Divider(),
-        pw.Header(
-          level: 0,
-          child: pw.Text(
-            'LISTA DE VERIFICACIÓN PARA LA INSPECCIÓN CONTINUA\nAIQ-OPS-F008',
-            style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
-            textAlign: pw.TextAlign.center,
-          ),
-        ),
-        pw.SizedBox(height: 8),
-        pw.Text('Fecha: ${fechaController.text}', style: pw.TextStyle(fontSize: 12)),
-        pw.Text('Hora: ${horaController.text}', style: pw.TextStyle(fontSize: 12)),
-        pw.Text('Número de Inspección: $_inspeccionSeleccionada', style: pw.TextStyle(fontSize: 12)),
-        pw.SizedBox(height: 12),
-        pw.Text('Observaciones Generales:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13)),
-        pw.Text(observacionesGeneralesController.text, style: pw.TextStyle(fontSize: 12)),
-        pw.SizedBox(height: 12),
-        pw.Text('Resultados de la Inspección:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13)),
-        pw.SizedBox(height: 8),
-
-        // Secciones e ítems en tablas
-        ...secciones.map((seccion) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.SizedBox(height: 10),
-            pw.Text(
-              seccion['titulo'],
-              style: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold,
-                fontSize: 13,
-                color: PdfColor.fromInt(0xFF263A5B),
-              ),
-            ),
-            pw.SizedBox(height: 4),
-            pw.Table(
-              border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
-              columnWidths: {
-                0: const pw.FlexColumnWidth(3),
-                1: const pw.FlexColumnWidth(2),
-              },
-              children: [
-                pw.TableRow(
-                  decoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFFD7DBE7)),
-                  children: [
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(4),
-                      child: pw.Text('Ítem', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11)),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.all(4),
-                      child: pw.Text('Resultado', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11)),
-                    ),
-                  ],
-                ),
-                ...List<pw.TableRow>.from(
-                  (seccion['items'] as List<String>).map((item) {
-                    final key = "${seccion['titulo']}-${item}";
-                    final value = _selecciones[key] ?? '';
-                    if (item.toLowerCase().contains("observaciones")) {
-                      return pw.TableRow(
-                        children: [
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.all(4),
-                            child: pw.Text(item, style: pw.TextStyle(fontSize: 11)),
-                          ),
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.all(4),
-                            child: pw.Text(
-                              value.toString().isEmpty ? "Sin observaciones" : value,
-                              style: pw.TextStyle(fontSize: 11),
-                            ),
-                          ),
-                        ],
-                      );
-                    } else {
-                      return pw.TableRow(
-                        children: [
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.all(4),
-                            child: pw.Text(item, style: pw.TextStyle(fontSize: 11)),
-                          ),
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.all(4),
-                            child: pw.Text(
-                              getTextoSeleccion(value),
-                              style: pw.TextStyle(fontSize: 11),
-                            ),
-                          ),
-                        ],
-                      );
-                    }
-                  }),
-                ),
-              ],
-            ),
-          ],
-        )),
-        pw.SizedBox(height: 24),
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.center,
-          children: [
-            pw.Container(
-              width: 260, // Más compacto y centrado
-              decoration: pw.BoxDecoration(
-                color: PdfColor.fromInt(0xFFFFFFFF),
-                borderRadius: pw.BorderRadius.circular(24),
-              ),
-              padding: const pw.EdgeInsets.all(18),
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center, // Centra el contenido dentro del recuadro
-                children: [
-                  pw.Text("Enterado", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 18, color: PdfColor.fromInt(0xFF263A5B))),
-                  pw.SizedBox(height: 10),
-                  pw.Text("Nombre: ${enteradoNombreController.text}", style: pw.TextStyle(fontSize: 12)),
-                  pw.Text("Fecha: ${enteradoFechaController.text}", style: pw.TextStyle(fontSize: 12)),
-                  pw.SizedBox(height: 10),
-                  pw.Text("Firma:", style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
-                  pw.SizedBox(height: 6),
-                  if (signatureBytes != null) ...[
-                    pw.Center(
-                      child: pw.Image(
-                        pw.MemoryImage(signatureBytes),
-                        width: 120,
-                        height: 40,
-                      ),
-                    ),
-                  ] else ...[
-                    pw.Container(
-                      width: 120,
-                      height: 40,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
-
-  await Printing.layoutPdf(
-    onLayout: (PdfPageFormat format) async => pdf.save(),
-  );
 }
 
 Future<void> compartirPDF() async {
@@ -1127,8 +968,8 @@ Future<void> compartirPDF() async {
 
     // Definir fechaStr para la cabecera
     final fechaGeneracion = DateTime.now();
-    final fechaStr = "${fechaGeneracion.day.toString().padLeft(2, '0')}/"
-        "${fechaGeneracion.month.toString().padLeft(2, '0')}/"
+    final fechaStr = "${fechaGeneracion.day.toString().padLeft(2, '0')}-"
+        "${fechaGeneracion.month.toString().padLeft(2, '0')}-"
         "${fechaGeneracion.year}";
 
     pdf.addPage(
@@ -1288,7 +1129,7 @@ Future<void> compartirPDF() async {
 
     // Guardar el PDF en un archivo temporal
     final output = await getTemporaryDirectory();
-    final file = File('${output.path}/AIQ-OPS-F008.pdf');
+    final file = File('${output.path}/AIQ-OPS-F008-$fechaStr-$folio.pdf');
     await file.writeAsBytes(await pdf.save());
 
     // Compartir el archivo
@@ -1296,6 +1137,22 @@ Future<void> compartirPDF() async {
       [XFile(file.path)],
       text: 'Formulario AIQ-OPS-F008',
     );
+
+    // Subir a Google Drive y obtener el enlace
+    const folderId = '1mbbaYH9Nr1UhT6vcK2hnIU_3XPcJ0vWp'; // Reemplaza por tu ID real
+    final link = await subirPDFaDriveEnCarpeta(file, folderId);
+    if (link != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('PDF subido a Google Drive. ¡Haz clic para abrir el enlace!'),
+          action: SnackBarAction(
+            label: 'Abrir',
+            onPressed: () => launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication),
+          ),
+          duration: Duration(seconds: 8),
+        ),
+      );
+    }
   } catch (e, st) {
     print('Error al compartir PDF: $e\n$st');
     if (mounted) {
@@ -1319,3 +1176,6 @@ String getTextoSeleccion(String? valor) {
     }
   }
 }
+
+//Formularios para agregar Drive
+//F008, F007, F005.

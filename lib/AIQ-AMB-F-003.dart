@@ -10,14 +10,14 @@ import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 
-class AIQ_AMB_F_003class extends StatefulWidget {
-  const AIQ_AMB_F_003class({super.key});
+class AIQAMBF003Screen extends StatefulWidget {
+  const AIQAMBF003Screen({super.key});
 
   @override
-  State<AIQ_AMB_F_003class> createState() => _FaunaScreenState();
+  State<AIQAMBF003Screen> createState() => _FaunaScreenState();
 }
 
-class _FaunaScreenState extends State<AIQ_AMB_F_003class> {
+class _FaunaScreenState extends State<AIQAMBF003Screen> {
   int folio = 1;
   String fechaHoy = "${DateTime.now().day.toString().padLeft(2, '0')}/"
       "${DateTime.now().month.toString().padLeft(2, '0')}/"

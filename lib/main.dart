@@ -119,7 +119,10 @@ class WelcomeScreen extends StatelessWidget {
                     );
                   },
                   elevation: 2,
-                  sliderButtonIcon: const Icon(Icons.arrow_forward, color: Colors.white),
+                  sliderButtonIcon: Transform.rotate(
+                    angle: 1.5708, // 90 grados en radianes
+                    child: const Icon(Icons.airplanemode_active_sharp, color: Colors.white),
+                  ),
                 ),
               ),
             ],

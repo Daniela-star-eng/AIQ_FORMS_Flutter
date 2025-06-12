@@ -4,10 +4,9 @@ import 'package:interfaz_uno_aiq/AIQ-OPS-F008.dart';
 import 'package:interfaz_uno_aiq/AIQ-OPS-F007.dart';
 import 'package:interfaz_uno_aiq/AIQ-OPS-F005.dart';
 import 'derrames.dart'; // Asegúrate de tener este archivo creado con el widget DerramesScreen
-import 'package:interfaz_uno_aiq/AIQ_AMB_F-003.DART';
+import 'package:interfaz_uno_aiq/AIQ-AMB-F-003.DART';
 import 'package:interfaz_uno_aiq/derrames.dart' as derrames_lib; // Asegúrate de tener este archivo creado con el widget DerramesScreen
 import 'package:interfaz_uno_aiq/AIQ-AMB-F-004.dart';
-import 'package:interfaz_uno_aiq/AIQ-AMB-F-004.dart'; // Asegúrate de importar el nuevo formulario
 import 'package:interfaz_uno_aiq/AIQ-AMB-F-001.dart';
 import 'package:interfaz_uno_aiq/AIQ-AMB-F-002.dart';
 
@@ -43,22 +42,22 @@ class _FormularioScreenState extends State<FormularioScreen> {
     {
       "titulo": "MONITOREO DE RESTOS DE FAUNA EN AREAS OPERATIVAS",
       "codigo": "AIQ-AMB-F-003",
-      "imagen": "assets/generica.jpg",
+      "imagen": "assets/AIQ-AMB-F-003-FORM-PREVIEW.jpg",
     },
     {
       "titulo": "NUEVO FORMULARIO",
-      "codigo": "AIQ-NF-001",
-      "imagen": "assets/avionG.jpg",
+      "codigo": "AIQ-AMB-F-004",
+      "imagen": "assets/AIQ-AMB-F-004-FORM-PREVIEW.jpg",
     },
     {
       "titulo": "Formulario Fauna",
       "codigo": "AIQ-AMB-F-001",
-      "imagen": "assets/foto_random.jpg",
+      "imagen": "assets/AIQ-AMB-F-001-FORM-PREVIEW.jpg",
     },
     {
       "titulo": "FORMULARIO DE FAUNA Y HABITAD",
       "codigo": "AIQ-AMB-F-002",
-      "imagen": "assets/airbus.png",
+      "imagen": "assets/AIQ-AMB-F-002-FORM-PREVIEW.jpg",
     }
      
   ];
@@ -195,12 +194,12 @@ class _FormularioScreenState extends State<FormularioScreen> {
                         } else if (index == 4) {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (context) => const AIQ_AMB_F_003class()),
+                            MaterialPageRoute(builder: (context) => const AIQAMBF003Screen()),
                           );
                         } else if (index == 5) {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (context) => const AIQ_AMB_F_004()),
+                            MaterialPageRoute(builder: (context) => const AIQAMBF004Screen()),
                           );
                         } else if (index == 6) {
                           Navigator.push(

@@ -4,8 +4,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:image_picker/image_picker.dart';
 import 'package:signature/signature.dart';
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
@@ -13,6 +11,65 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+// Google Drive & Auth imports
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:googleapis/drive/v3.dart' as drive;
+import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
+
+// GoogleAuthClient for Drive API
+class GoogleAuthClient extends http.BaseClient {
+  final Map<String, String> _headers;
+  final http.Client _client = http.Client();
+  GoogleAuthClient(this._headers);
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    return _client.send(request..headers.addAll(_headers));
+  }
+}
+
+// Function to upload PDF to Drive in a specific folder
+Future<String?> subirPDFaDriveEnCarpeta(File pdfFile, String folderId) async {
+  final googleSignIn = GoogleSignIn(
+    scopes: [
+      drive.DriveApi.driveFileScope,
+      drive.DriveApi.driveAppdataScope,
+      drive.DriveApi.driveMetadataScope,
+    ],
+  );
+  await googleSignIn.signOut(); // Always prompt account selection
+  final account = await googleSignIn.signIn();
+  if (account == null) return null;
+  final authHeaders = await account.authHeaders;
+  final authenticateClient = GoogleAuthClient(authHeaders);
+  final driveApi = drive.DriveApi(authenticateClient);
+
+  final media = drive.Media(pdfFile.openRead(), pdfFile.lengthSync());
+  final driveFile = drive.File();
+  driveFile.name = pdfFile.path.split('/').last;
+  driveFile.parents = [folderId];
+
+  final uploadedFile = await driveApi.files.create(
+    driveFile,
+    uploadMedia: media,
+  );
+
+  // Make file shareable
+  await driveApi.permissions.create(
+    drive.Permission()
+      ..type = 'anyone'
+      ..role = 'reader',
+    uploadedFile.id!,
+  );
+
+  final fileMeta = await driveApi.files.get(
+    uploadedFile.id!,
+    // 'fields' is not always supported, so we fetch the full object
+  );
+  // Return the webViewLink if available
+  return (fileMeta as drive.File).webViewLink;
+}
 
 class AIQOPSF005Screen extends StatefulWidget {
   const AIQOPSF005Screen({super.key});
@@ -49,9 +106,19 @@ class _AIQOPSF005ScreenState extends State<AIQOPSF005Screen> {
 
   final Map<String, List<XFile>> fotosPorSelector = {};
 
-  PlatformFile? _pdfFile;
-
   int folio = 1;
+
+  // Nueva variable para el consecutivo
+  int consecutivoMostrado = 1;
+  DateTime? fechaSeleccionada;
+
+  // Errores
+  bool _errorFecha = false;
+  bool _errorHora = false;
+  bool _errorNombre = false;
+  bool _errorFechaEnterado = false;
+  bool _errorMotivosFallas = false;
+  bool _errorFirma = false;
 
   @override
   void initState() {
@@ -73,6 +140,7 @@ class _AIQOPSF005ScreenState extends State<AIQOPSF005Screen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFEAEFF8), // <-- aquí el color de fondo
       body: SafeArea(
         child: Stack(
           children: [
@@ -105,15 +173,31 @@ class _AIQOPSF005ScreenState extends State<AIQOPSF005Screen> {
                     "AIQ-OPS-F005",
                     style: TextStyle(color: Color(0xFF598CBC), fontSize: 23, fontWeight: FontWeight.bold, fontFamily: 'Avenir'),
                   ),
-                  const SizedBox(height: 16),
-
+                Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                    margin: const EdgeInsets.only(top: 5, bottom: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Color(0xFF598CBC)),
+                    ),
+                    child: Text(
+                      folioGenerado,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF263A5B),
+                        fontSize: 14,
+                        fontFamily: 'Avenir',
+                      ),
+                    ),
+                  ),
                   // Datos de la Inspección
                   Container(
                     decoration: BoxDecoration(
                       color: const Color(0xFFD7DBE7),
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(8),
                     margin: const EdgeInsets.only(bottom: 16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -144,7 +228,7 @@ class _AIQOPSF005ScreenState extends State<AIQOPSF005Screen> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 5),
                         Row(
                           children: [
                             Expanded(
@@ -176,7 +260,7 @@ class _AIQOPSF005ScreenState extends State<AIQOPSF005Screen> {
                       showDialog(
                         context: context,
                         builder: (_) => Dialog(
-                          backgroundColor: Colors.transparent,
+                          backgroundColor: const Color.fromARGB(0, 255, 255, 255),
                           child: InteractiveViewer(
                             panEnabled: true,
                             minScale: 1,
@@ -652,6 +736,10 @@ class _AIQOPSF005ScreenState extends State<AIQOPSF005Screen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _errorFecha ? Colors.red : Colors.transparent,
+          width: 2,
+        ),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: TextField(
@@ -661,6 +749,7 @@ class _AIQOPSF005ScreenState extends State<AIQOPSF005Screen> {
           labelText: label,
           icon: isTime ? const Icon(Icons.access_time) : const Icon(Icons.calendar_today),
           border: InputBorder.none,
+          errorText: _errorFecha ? 'Campo obligatorio' : null,
         ),
         onTap: () async {
           if (isTime) {
@@ -681,8 +770,12 @@ class _AIQOPSF005ScreenState extends State<AIQOPSF005Screen> {
               lastDate: DateTime(2100),
             );
             if (pickedDate != null) {
+              final consecutivo = await obtenerConsecutivoParaFecha(pickedDate);
               setState(() {
-                fechaController.text = "${pickedDate.day}/${pickedDate.month}/${pickedDate.year}";
+                fechaSeleccionada = pickedDate;
+                fechaController.text = "${pickedDate.day.toString().padLeft(2, '0')}/${pickedDate.month.toString().padLeft(2, '0')}/${pickedDate.year}";
+                consecutivoMostrado = consecutivo;
+                _errorFecha = false;
               });
             }
           }
@@ -816,7 +909,7 @@ class _AIQOPSF005ScreenState extends State<AIQOPSF005Screen> {
       ),
       selected: selected,
       selectedColor: color,
-      backgroundColor: const Color(0xFFE2E4EC),
+      backgroundColor: const Color.fromARGB(255, 228, 229, 235),
       onSelected: (_) => onChanged(label),
     );
   }
@@ -883,126 +976,322 @@ class _AIQOPSF005ScreenState extends State<AIQOPSF005Screen> {
     }
   }
 
+  // --- PREPARAR EVIDENCIA FOTOGRÁFICA ---
+  // Mapeo de id de selector a descripción legible
+  final Map<String, String> descripcionPorId = {
+    'cercado': 'Sección 1. Geometría del Área de Movimiento',
+    'control_accesos_condicion': 'Sección 2. Condición del Cercado Perimetral',
+    'vigilancia_accesos': 'Sección 3. Control de Accesos',
+    'bitacora_accesos': 'Sección 3. Control de Accesos',
+    'comunicacionesA': 'Sección 4. Comunicaciones terrestres',
+    'fallas_comunicacion_terrestre': 'Sección 4. Comunicaciones terrestres',
+    'comunicacionesD': 'Sección 4. Comunicaciones terrestres',
+    'vehiculos_area_operacional': 'Sección 5. Comunicaciones y señales de vehículos en plataforma',
+  };
+  final Map<String, List<pw.ImageProvider>> fotosPorSelectorPDF = {};
+  for (final entry in fotosPorSelector.entries) {
+    final List<pw.ImageProvider> imagenes = [];
+    for (final foto in entry.value) {
+      final file = File(foto.path);
+      if (await file.exists()) {
+        final bytes = await file.readAsBytes();
+        imagenes.add(pw.MemoryImage(bytes));
+      }
+    }
+    if (imagenes.isNotEmpty) {
+      fotosPorSelectorPDF[entry.key] = imagenes;
+    }
+  }
+
   pdf.addPage(
     pw.MultiPage(
-      build: (pw.Context context) => [
-        // Encabezado con logo y fecha
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Container(
-              height: 50,
-              width: 50,
-              child: pw.Image(logo),
-            ),
-            pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.end,
-              children: [
-                pw.Text('Folio: $folio', style: labelStyle),
-                pw.Text('Fecha: ${fechaController.text.isNotEmpty ? fechaController.text : _fechaActual()}', style: labelStyle),
-                pw.Text('AIQ-OPS-F005', style: pw.TextStyle(color: PdfColors.blue, fontWeight: pw.FontWeight.bold)),
-              ],
-            ),
-          ],
-        ),
-        pw.SizedBox(height: 16),
-        pw.Text(
+      build: (pw.Context context) {
+        final List<pw.Widget> widgets = [];
+        // Encabezado
+        widgets.add(
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Container(
+                height: 50,
+                width: 50,
+                child: pw.Image(logo),
+              ),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                children: [
+                  pw.Text('Folio: $folio', style: labelStyle),
+                  pw.Text('Fecha:  {fechaController.text.isNotEmpty ? fechaController.text : _fechaActual()}', style: labelStyle),
+                  pw.Text('AIQ-OPS-F005', style: pw.TextStyle(color: PdfColors.blue, fontWeight: pw.FontWeight.bold)),
+                ],
+              ),
+            ],
+          ),
+        );
+        widgets.add(pw.SizedBox(height: 16));
+        widgets.add(pw.Text(
           'LISTA DE VERIFICACIÓN PARA PREVENIR INCURSIONES EN EL ÁREA DE MOVIMIENTO',
           style: headerStyle,
           textAlign: pw.TextAlign.center,
-        ),
-        pw.Divider(),
-
+        ));
+        widgets.add(pw.Divider());
         // Datos de la Inspección
-        pw.Text('Datos de la Inspección', style: sectionTitleStyle),
-        pw.SizedBox(height: 8),
-        pw.Row(
-          children: [
-            pw.Text('Hora: ', style: labelStyle),
-            pw.Text(horaController.text, style: valueStyle),
-            pw.SizedBox(width: 30),
-            pw.Text('Inspección: ', style: labelStyle),
-            pw.Text(_inspeccionSeleccionada == 1 ? "1/2" : "2/2", style: valueStyle),
-          ],
-        ),
-        pw.SizedBox(height: 8),
-        pw.Row(
-          children: [
-            pw.Text('Folio: ', style: labelStyle),
-            pw.Text(folio.toString(), style: valueStyle),
-          ],
-        ),
-        pw.SizedBox(height: 18),
-
+        widgets.add(pw.Text('Datos de la Inspección', style: sectionTitleStyle));
+        widgets.add(pw.SizedBox(height: 8));
+        widgets.add(
+          pw.Row(
+            children: [
+              pw.Text('Hora: ', style: labelStyle),
+              pw.Text(horaController.text, style: valueStyle),
+              pw.SizedBox(width: 30),
+              pw.Text('Inspección: ', style: labelStyle),
+              pw.Text(_inspeccionSeleccionada == 1 ? "1/2" : "2/2", style: valueStyle),
+            ],
+          ),
+        );
+        widgets.add(pw.SizedBox(height: 8));
+        widgets.add(
+          pw.Row(
+            children: [
+              pw.Text('Folio: ', style: labelStyle),
+              pw.Text(folio.toString(), style: valueStyle),
+            ],
+          ),
+        );
+        widgets.add(pw.SizedBox(height: 18));
         // Sección 1: Geometría del Área de Movimiento
-        pw.Text('Sección 1. Geometría del Área de Movimiento.', style: sectionTitleStyle),
-        pw.SizedBox(height: 8),
-        pw.Center(
-          child: pw.Image(plano, height: 250),
-        ),
-        pw.SizedBox(height: 18),
-
+        widgets.add(pw.Text('Sección 1. Geometría del Área de Movimiento.', style: sectionTitleStyle));
+        widgets.add(pw.SizedBox(height: 8));
+        widgets.add(pw.Center(child: pw.Image(plano, height: 250)));
+        // Fotos de sección 1 (si existen)
+        if (fotosPorSelectorPDF['cercado'] != null && fotosPorSelectorPDF['cercado']!.isNotEmpty) {
+          widgets.add(pw.SizedBox(height: 8));
+          widgets.add(pw.Text('Evidencia fotográfica:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13, color: PdfColors.blue800)));
+          for (final img in fotosPorSelectorPDF['cercado']!) {
+            widgets.add(
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Container(width: 180, height: 180, child: pw.Image(img, fit: pw.BoxFit.cover)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(descripcionPorId['cercado']!, style: pw.TextStyle(fontSize: 11, color: PdfColors.grey700, fontStyle: pw.FontStyle.italic)),
+                  pw.SizedBox(height: 16),
+                ],
+              ),
+            );
+          }
+        }
+        widgets.add(pw.SizedBox(height: 18));
         // Sección 2: Condición del Cercado Perimetral
-        pw.Text('Sección 2. Condición del Cercado Perimetral', style: sectionTitleStyle),
-        pw.SizedBox(height: 6),
-        pw.Text('a) Estado físico del cercado perimetral: $estadoCercado', style: valueStyle),
-        pw.SizedBox(height: 18),
-
+        widgets.add(pw.Text('Sección 2. Condición del Cercado Perimetral', style: sectionTitleStyle));
+        widgets.add(pw.SizedBox(height: 6));
+        widgets.add(pw.Text('a) Estado físico del cercado perimetral: $estadoCercado', style: valueStyle));
+        // Fotos de sección 2 (si existen)
+        if (fotosPorSelectorPDF['control_accesos_condicion'] != null && fotosPorSelectorPDF['control_accesos_condicion']!.isNotEmpty) {
+          widgets.add(pw.SizedBox(height: 8));
+          widgets.add(pw.Text('Evidencia fotográfica:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13, color: PdfColors.blue800)));
+          for (final img in fotosPorSelectorPDF['control_accesos_condicion']!) {
+            widgets.add(
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Container(width: 180, height: 180, child: pw.Image(img, fit: pw.BoxFit.cover)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(descripcionPorId['control_accesos_condicion']!, style: pw.TextStyle(fontSize: 11, color: PdfColors.grey700, fontStyle: pw.FontStyle.italic)),
+                  pw.SizedBox(height: 16),
+                ],
+              ),
+            );
+          }
+        }
+        widgets.add(pw.SizedBox(height: 18));
         // Sección 3: Control de Accesos
-        pw.Text('Sección 3. Control de Accesos', style: sectionTitleStyle),
-        pw.SizedBox(height: 6),
-        pw.Text('a) Condición de Accesos: $estadoAccesos', style: valueStyle),
-        pw.SizedBox(height: 4),
-        pw.Text('b) Vigilancia en los Accesos: $vigilanciaAccesos', style: valueStyle),
-        pw.SizedBox(height: 4),
-        pw.Text('c) Bitácora de Accesos: $bitacoraAccesos', style: valueStyle),
-        pw.SizedBox(height: 18),
-
+        widgets.add(pw.Text('Sección 3. Control de Accesos', style: sectionTitleStyle));
+        widgets.add(pw.SizedBox(height: 6));
+        widgets.add(pw.Text('a) Condición de Accesos: $estadoAccesos', style: valueStyle));
+        widgets.add(pw.SizedBox(height: 4));
+        widgets.add(pw.Text('b) Vigilancia en los Accesos: $vigilanciaAccesos', style: valueStyle));
+        widgets.add(pw.SizedBox(height: 4));
+        widgets.add(pw.Text('c) Bitácora de Accesos: $bitacoraAccesos', style: valueStyle));
+        // Fotos de sección 3 (si existen)
+        if (fotosPorSelectorPDF['vigilancia_accesos'] != null && fotosPorSelectorPDF['vigilancia_accesos']!.isNotEmpty) {
+          widgets.add(pw.SizedBox(height: 8));
+          widgets.add(pw.Text('Evidencia fotográfica:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13, color: PdfColors.blue800)));
+          for (final img in fotosPorSelectorPDF['vigilancia_accesos']!) {
+            widgets.add(
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Container(width: 180, height: 180, child: pw.Image(img, fit: pw.BoxFit.cover)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(descripcionPorId['vigilancia_accesos']!, style: pw.TextStyle(fontSize: 11, color: PdfColors.grey700, fontStyle: pw.FontStyle.italic)),
+                  pw.SizedBox(height: 16),
+                ],
+              ),
+            );
+          }
+        }
+        if (fotosPorSelectorPDF['bitacora_accesos'] != null && fotosPorSelectorPDF['bitacora_accesos']!.isNotEmpty) {
+          widgets.add(pw.SizedBox(height: 8));
+          widgets.add(pw.Text('Evidencia fotográfica:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13, color: PdfColors.blue800)));
+          for (final img in fotosPorSelectorPDF['bitacora_accesos']!) {
+            widgets.add(
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Container(width: 180, height: 180, child: pw.Image(img, fit: pw.BoxFit.cover)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(descripcionPorId['bitacora_accesos']!, style: pw.TextStyle(fontSize: 11, color: PdfColors.grey700, fontStyle: pw.FontStyle.italic)),
+                  pw.SizedBox(height: 16),
+                ],
+              ),
+            );
+          }
+        }
+        widgets.add(pw.SizedBox(height: 18));
         // Sección 4: Comunicaciones terrestres
-        pw.Text('Sección 4. Comunicaciones terrestres', style: sectionTitleStyle),
-        pw.SizedBox(height: 6),
-        pw.Text('a) Condición del equipo de comunicaciones terrestres: $estadoComunicacionesA', style: valueStyle),
-        pw.SizedBox(height: 4),
-        pw.Text('b) Ha presentado fallas últimamente la comunicación terrestre: $estadoComunicacionesB', style: valueStyle),
-        pw.SizedBox(height: 4),
-        pw.Text('c) Motivo de fallas: ${motivosFallasController.text}', style: obsStyle),
-        pw.SizedBox(height: 4),
-        pw.Text('d) Se ha recurrido a usar medios visuales para la comunicación: $estadoComunicacionesD', style: valueStyle),
-        pw.SizedBox(height: 18),
-
+        widgets.add(pw.Text('Sección 4. Comunicaciones terrestres', style: sectionTitleStyle));
+        widgets.add(pw.SizedBox(height: 6));
+        widgets.add(pw.Text('a) Condición del equipo de comunicaciones terrestres: $estadoComunicacionesA', style: valueStyle));
+        widgets.add(pw.SizedBox(height: 4));
+        widgets.add(pw.Text('b) Ha presentado fallas últimamente la comunicación terrestre: $estadoComunicacionesB', style: valueStyle));
+        widgets.add(pw.SizedBox(height: 4));
+        widgets.add(pw.Text('c) Motivo de fallas: ${motivosFallasController.text}', style: obsStyle));
+        widgets.add(pw.SizedBox(height: 4));
+        widgets.add(pw.Text('d) Se ha recurrido a usar medios visuales para la comunicación: $estadoComunicacionesD', style: valueStyle));
+        // Fotos de sección 4 (si existen)
+        if (fotosPorSelectorPDF['comunicacionesA'] != null && fotosPorSelectorPDF['comunicacionesA']!.isNotEmpty) {
+          widgets.add(pw.SizedBox(height: 8));
+          widgets.add(pw.Text('Evidencia fotográfica:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13, color: PdfColors.blue800)));
+          for (final img in fotosPorSelectorPDF['comunicacionesA']!) {
+            widgets.add(
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Container(width: 180, height: 180, child: pw.Image(img, fit: pw.BoxFit.cover)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(descripcionPorId['comunicacionesA']!, style: pw.TextStyle(fontSize: 11, color: PdfColors.grey700, fontStyle: pw.FontStyle.italic)),
+                  pw.SizedBox(height: 16),
+                ],
+              ),
+            );
+          }
+        }
+        if (fotosPorSelectorPDF['fallas_comunicacion_terrestre'] != null && fotosPorSelectorPDF['fallas_comunicacion_terrestre']!.isNotEmpty) {
+          widgets.add(pw.SizedBox(height: 8));
+          widgets.add(pw.Text('Evidencia fotográfica:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13, color: PdfColors.blue800)));
+          for (final img in fotosPorSelectorPDF['fallas_comunicacion_terrestre']!) {
+            widgets.add(
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Container(width: 180, height: 180, child: pw.Image(img, fit: pw.BoxFit.cover)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(descripcionPorId['fallas_comunicacion_terrestre']!, style: pw.TextStyle(fontSize: 11, color: PdfColors.grey700, fontStyle: pw.FontStyle.italic)),
+                  pw.SizedBox(height: 16),
+                ],
+              ),
+            );
+          }
+        }
+        if (fotosPorSelectorPDF['comunicacionesD'] != null && fotosPorSelectorPDF['comunicacionesD']!.isNotEmpty) {
+          widgets.add(pw.SizedBox(height: 8));
+          widgets.add(pw.Text('Evidencia fotográfica:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13, color: PdfColors.blue800)));
+          for (final img in fotosPorSelectorPDF['comunicacionesD']!) {
+            widgets.add(
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Container(width: 180, height: 180, child: pw.Image(img, fit: pw.BoxFit.cover)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(descripcionPorId['comunicacionesD']!, style: pw.TextStyle(fontSize: 11, color: PdfColors.grey700, fontStyle: pw.FontStyle.italic)),
+                  pw.SizedBox(height: 16),
+                ],
+              ),
+            );
+          }
+        }
+        widgets.add(pw.SizedBox(height: 18));
         // Sección 5: Comunicaciones y señales de vehículos en plataforma
-        pw.Text('Sección 5. Comunicaciones y señales de vehículos en plataforma', style: sectionTitleStyle),
-        pw.SizedBox(height: 6),
-        pw.Text('a) Vehículos con características necesarias: $estadoVehiculosA', style: valueStyle),
-        pw.SizedBox(height: 18),
-
+        widgets.add(pw.Text('Sección 5. Comunicaciones y señales de vehículos en plataforma', style: sectionTitleStyle));
+        widgets.add(pw.SizedBox(height: 6));
+        widgets.add(pw.Text('a) Vehículos con características necesarias: $estadoVehiculosA', style: valueStyle));
+        // Fotos de sección 5 (si existen)
+        if (fotosPorSelectorPDF['vehiculos_area_operacional'] != null && fotosPorSelectorPDF['vehiculos_area_operacional']!.isNotEmpty) {
+          widgets.add(pw.SizedBox(height: 8));
+          widgets.add(pw.Text('Evidencia fotográfica:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13, color: PdfColors.blue800)));
+          for (final img in fotosPorSelectorPDF['vehiculos_area_operacional']!) {
+            widgets.add(
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Container(width: 180, height: 180, child: pw.Image(img, fit: pw.BoxFit.cover)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(descripcionPorId['vehiculos_area_operacional']!, style: pw.TextStyle(fontSize: 11, color: PdfColors.grey700, fontStyle: pw.FontStyle.italic)),
+                  pw.SizedBox(height: 16),
+                ],
+              ),
+            );
+          }
+        }
+        widgets.add(pw.SizedBox(height: 18));
         // Enterado
-        pw.Text('Enterado', style: sectionTitleStyle),
-        pw.SizedBox(height: 8),
-        pw.Row(
-          children: [
-            pw.Text('Nombre: ', style: labelStyle),
-            pw.Text(enteradoNombreController.text, style: valueStyle),
-            pw.SizedBox(width: 30),
-            pw.Text('Fecha: ', style: labelStyle),
-            pw.Text(enteradoFechaController.text, style: valueStyle),
-          ],
-        ),
-        pw.SizedBox(height: 12),
-        pw.Text('Firma:', style: labelStyle),
-        pw.Container(
-          height: 60,
-          width: 180,
-          alignment: pw.Alignment.center,
-          child: firmaImage != null
-              ? pw.Image(firmaImage, height: 50)
-              : pw.Text('_________________', style: obsStyle),
-        ),
-      ],
+        widgets.add(pw.Text('Enterado', style: sectionTitleStyle));
+        widgets.add(pw.SizedBox(height: 8));
+        widgets.add(
+          pw.Row(
+            children: [
+              pw.Text('Nombre: ', style: labelStyle),
+              pw.Text(enteradoNombreController.text, style: valueStyle),
+              pw.SizedBox(width: 30),
+              pw.Text('Fecha: ', style: labelStyle),
+              pw.Text(enteradoFechaController.text, style: valueStyle),
+            ],
+          ),
+        );
+        widgets.add(pw.SizedBox(height: 12));
+        widgets.add(pw.Text('Firma:', style: labelStyle));
+        widgets.add(
+          pw.Container(
+            height: 60,
+            width: 180,
+            alignment: pw.Alignment.center,
+            child: firmaImage != null
+                ? pw.Image(firmaImage, height: 50)
+                : pw.Text('_', style: obsStyle),
+          ),
+        );
+        // --- EVIDENCIA FOTOGRÁFICA AL FINAL DEL PDF ---
+        if (fotosPorSelectorPDF.isNotEmpty) {
+          widgets.add(pw.Divider());
+          widgets.add(pw.Text('Evidencia fotográfica', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 16, color: PdfColors.blue900)));
+          widgets.add(pw.SizedBox(height: 8));
+          fotosPorSelectorPDF.forEach((id, imagenes) {
+            final descripcion = descripcionPorId[id] ?? id;
+            for (final img in imagenes) {
+              widgets.add(
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
+                  children: [
+                    pw.Container(
+                      width: 180,
+                      height: 180,
+                      child: pw.Image(img, fit: pw.BoxFit.cover),
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Text(descripcion, style: pw.TextStyle(fontSize: 11, color: PdfColors.grey700, fontStyle: pw.FontStyle.italic)),
+                    pw.SizedBox(height: 16),
+                  ],
+                ),
+              );
+            }
+          });
+        }
+        return widgets;
+      },
     ),
   );
-
   return pdf;
 }
 
@@ -1043,7 +1332,21 @@ Future<void> incrementarFolio() async {
   await prefs.setInt('folio_f005', folio);
 }
 
+String get folioGenerado {
+  if (fechaSeleccionada == null) return "AIQOPSF005---/--/-----$consecutivoMostrado";
+  final anio = fechaSeleccionada!.year.toString();
+  final mes = fechaSeleccionada!.month.toString().padLeft(2, '0');
+  final dia = fechaSeleccionada!.day.toString().padLeft(2, '0');
+  return "AIQOPSF005-$anio-$mes-$dia-$consecutivoMostrado";
+}
+
 void guardarFormularioF005() async {
+  if (!validarCamposObligatorios()) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Por favor, completa todos los campos obligatorios y la firma')),
+    );
+    return;
+  }
   try {
     // 1. Guarda en Firebase
     await guardarEnAIQOPSF005(
@@ -1062,20 +1365,40 @@ void guardarFormularioF005() async {
       estadoComunicacionesD: estadoComunicacionesD,
       motivosFallas: motivosFallasController.text,
       enteradoFecha: enteradoFechaController.text,
-      // Agrega aquí más campos si los necesitas
     );
 
-    // 2. Exporta a PDF
-    await exportarPDF();
+    // 2. Exporta a PDF y guarda en archivo temporal
+    final pdf = await generarDocumentoPDF();
+    final bytes = await pdf.save();
+    final dir = await getTemporaryDirectory();
+    // Nombre de archivo: AIQ-OPS-F005-$fecha-$folio.pdf
+    final fechaStr = fechaController.text.isNotEmpty ? fechaController.text.replaceAll('/', '-') : _fechaActual().replaceAll('/', '-');
+    final file = File('${dir.path}/AIQ-OPS-F005-$fechaStr-$folio.pdf');
+    await file.writeAsBytes(bytes);
 
-    // 3. (Opcional) Muestra mensaje de éxito
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Formulario guardado en Firebase y exportado a PDF')),
-    );
+    // 3. Sube el PDF a Drive automáticamente a la carpeta fija
+    const folderId = '1H-ZIrZ26_8YykhE_1WZYEw6H90npNk27'; // ID de la carpeta fija
+    final link = await subirPDFaDriveEnCarpeta(file, folderId);
+    if (link != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('PDF subido a Google Drive. ¡Haz clic para abrir el enlace!'),
+          action: SnackBarAction(
+            label: 'Abrir',
+            onPressed: () => launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication),
+          ),
+          duration: const Duration(seconds: 8),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo subir el PDF a Google Drive.')),
+      );
+    }
 
-    // 4. (Opcional) Incrementa el folio
+    // 4. Incrementa el folio y limpia campos
     await incrementarFolio();
-
+    limpiarCampos();
   } catch (e, st) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Error al guardar/exportar: $e')),
@@ -1121,15 +1444,65 @@ Future<void> guardarEnAIQOPSF005({
     'motivosFallas': motivosFallas,
     'enteradoFecha': enteradoFecha,
     'timestamp': FieldValue.serverTimestamp(),
-    // Agrega aquí más campos si los necesitas
   };
 
-  await firestore.collection('AIQ_OPS_F005').doc(folio.toString()).set(datos);
+  await firestore.collection('AIQ-OPS-F005').doc(folioGenerado).set(datos);
+}
+
+Future<int> obtenerConsecutivoParaFecha(DateTime fecha) async {
+  final dia = fecha.day.toString().padLeft(2, '0');
+  final mes = fecha.month.toString().padLeft(2, '0');
+  final anio = fecha.year.toString();
+  final fechaStr = "$dia/$mes/$anio";
+
+  final snapshot = await FirebaseFirestore.instance
+      .collection('AIQ-OPS-F005')
+      .where('fecha', isEqualTo: fechaStr)
+      .get();
+
+  return snapshot.docs.length + 1;
+}
+
+bool validarCamposObligatorios() {
+  setState(() {
+    _errorFecha = fechaController.text.isEmpty;
+    _errorHora = horaController.text.isEmpty;
+    _errorNombre = enteradoNombreController.text.isEmpty;
+    _errorFechaEnterado = enteradoFechaController.text.isEmpty;
+    _errorMotivosFallas = motivosFallasController.text.isEmpty;
+    _errorFirma = !enteradoFirmaController.isNotEmpty;
+  });
+  return !(_errorFecha ||
+      _errorHora ||
+      _errorNombre ||
+      _errorFechaEnterado ||
+      _errorMotivosFallas ||
+      _errorFirma);
+}
+
+void limpiarCampos() {
+  fechaController.clear();
+  horaController.clear();
+  enteradoNombreController.clear();
+  enteradoFechaController.clear();
+  motivosFallasController.clear();
+  estadoCercado = "Bueno";
+  estadoAccesos = "Bueno";
+  vigilanciaAccesos = "Bueno";
+  bitacoraAccesos = "Bueno";
+  estadoComunicacionesA = "Bueno";
+  estadoComunicacionesB = "Sí";
+  estadoComunicacionesD = "Sí";
+  estadoVehiculosA = "Sí";
+  _inspeccionSeleccionada = 1;
+  fechaSeleccionada = null;
+  consecutivoMostrado = 1;
+  enteradoFirmaController.clear();
+  fotosPorSelector.clear();
+  setState(() {});
 }
 }
-//falta exportar el resto de formularios a excel.
-//editar los botones de compartir y exportar a excel.
-//agregar el logo del aiq a los archivos de excel.
-// que pueda exportar todos los registros de firebase a excel.
-//agregar que el pdf salga con las fotografías. F005 
-//Agarrar pdfs y mandar ruta a Drive. -- Dani
+
+//revisar lo de observaciones y fotos 
+//por que se limpia el formulario cuando se toma una 
+//foto y quitarle las validaciones a observaciones. 

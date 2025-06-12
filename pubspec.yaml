@@ -52,6 +52,10 @@ flutter:
     - assets/AIQ-AMB-F-004.jpg
     - assets/avionG.jpg
     - assets/generica.jpg
+    - assets/AIQ-AMB-F-001-FORM-PREVIEW.jpg
+    - assets/AIQ-AMB-F-002-FORM-PREVIEW.jpg
+    - assets/AIQ-AMB-F-004-FORM-PREVIEW.jpg
+    - assets/AIQ-AMB-F-003-FORM-PREVIEW.jpg
 
   fonts:
     - family: Avenir
